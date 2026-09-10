@@ -1,5 +1,7 @@
 import { CityLocation } from '../types';
 
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
+
 /**
  * Standard default telemetry station when no location has been selected yet
  */
@@ -102,7 +104,7 @@ export const locationService = {
     }
 
     try {
-      const response = await fetch(`/api/geocode/search?q=${encodeURIComponent(trimmed)}`, {
+      const response = await fetch(`${API_BASE}/geocode/search?q=${encodeURIComponent(trimmed)}`, {
         headers: { Accept: 'application/json' }
       });
 
@@ -187,7 +189,7 @@ export const locationService = {
     let displayName = `GPS (${lat.toFixed(2)}°, ${lng.toFixed(2)}°)`;
 
     try {
-      const res = await fetch(`/api/geocode/reverse?lat=${lat}&lon=${lng}`);
+      const res = await fetch(`${API_BASE}/geocode/reverse?lat=${lat}&lon=${lng}`);
       if (res.ok) {
         const geoData = await res.json();
         cityName = geoData.name || geoData.city || cityName;

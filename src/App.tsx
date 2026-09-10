@@ -23,7 +23,7 @@ import { ProfilePage } from './pages/ProfilePage';
 import { SettingsPage } from './pages/SettingsPage';
 
 function AppContent() {
-  const { user } = useAuth();
+  const { user, login } = useAuth();
   
   // URL Hash or state-based routing
   const getInitialPath = () => {
@@ -51,13 +51,24 @@ function AppContent() {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
+  const handleExploreDemo = async () => {
+    if (!user) {
+      try {
+        await login('krishna.sai@heatguard.ai', 'DemoPass2026!');
+      } catch (err) {
+        console.warn('Demo quick-access notice:', err);
+      }
+    }
+    navigate('/dashboard');
+  };
+
   // 1. Public Unauthenticated Routes
   if (currentPath === '/') {
     return (
       <LandingPage
         onGetStarted={() => navigate(user ? '/dashboard' : '/signup')}
         onLogin={() => navigate('/login')}
-        onExploreDemo={() => navigate('/dashboard')}
+        onExploreDemo={handleExploreDemo}
       />
     );
   }

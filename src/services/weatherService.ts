@@ -4,6 +4,7 @@ import { calculateHeatStress } from './heatStressEngine';
 
 const WEATHER_CACHE_KEY_PREFIX = 'heatguard_weather_live_';
 const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+const API_BASE = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/$/, '');
 
 export const weatherService = {
   /**
@@ -80,7 +81,7 @@ export const weatherService = {
     }
 
     // Try backend proxy endpoint first, with direct Open-Meteo fallback if backend is offline
-    const apiUrl = `/api/weather?lat=${lat}&lon=${lng}&city=${encodeURIComponent(city)}`;
+    const apiUrl = `${API_BASE}/weather?lat=${lat}&lon=${lng}&city=${encodeURIComponent(city)}`;
     
     let rawData: any = null;
 
@@ -95,11 +96,18 @@ export const weatherService = {
       clearTimeout(timeoutId);
 
       if (!response.ok) {
-        throw new Error(`API returned HTTP ${response.status}`);
+        let errDetails = '';
+        try {
+          const errBody = await response.json();
+          errDetails = errBody.error || errBody.details || '';
+        } catch {
+          // non-JSON error
+        }
+        throw new Error(`API HTTP ${response.status}${errDetails ? `: ${errDetails}` : ''}`);
       }
       rawData = await response.json();
-    } catch (backendError) {
-      console.warn('[HeatGuard] Backend API proxy unreachable, falling back to direct meteorological query:', backendError);
+    } catch (backendError: any) {
+      console.warn('[HeatGuard] Backend API proxy unreachable, falling back to direct meteorological query:', backendError?.message || backendError);
 
       // Direct fallback to Open-Meteo in case backend server is unreachable
       const fallbackUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,weather_code,surface_pressure,wind_speed_10m,wind_direction_10m,cloud_cover&hourly=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation_probability,precipitation,weather_code,wind_speed_10m,uv_index,dew_point_2m,visibility&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,sunrise,sunset,uv_index_max&timezone=auto&forecast_days=8`;
@@ -304,7 +312,7 @@ export const weatherService = {
    */
   async fetchHistoricalData(daysCount: number = 7, location: CityLocation) {
     try {
-      const response = await fetch(`/api/historical?lat=${location.lat}&lon=${location.lng}&days=${daysCount}`);
+      const response = await fetch(`${API_BASE}/historical?lat=${location.lat}&lon=${location.lng}&days=${daysCount}`);
       if (response.ok) {
         const data = await response.json();
         if (data.history && Array.isArray(data.history) && data.history.length > 0) {

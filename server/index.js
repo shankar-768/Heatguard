@@ -4,6 +4,7 @@ import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { db } from './db.js';
 
@@ -22,6 +23,13 @@ app.use(cors({
 }));
 app.use(cookieParser());
 app.use(express.json());
+
+const apiRouter = express.Router();
+
+// Base diagnostic endpoint
+apiRouter.get('/', (req, res) => {
+  res.json({ status: 'ok', backend: 'connected', service: 'HeatGuard AI Gateway' });
+});
 
 // In-memory cache for weather & geocoding to prevent excessive external requests
 const cache = new Map();
@@ -285,7 +293,7 @@ async function fetchFromWeatherApi(lat, lon, cityName, apiKey) {
  * 1. GET /api/weather
  * Retrieves real weather + forecast + air quality telemetry
  */
-app.get('/api/weather', async (req, res) => {
+apiRouter.get('/weather', async (req, res) => {
   try {
     const lat = parseFloat(req.query.lat || '16.5062');
     const lon = parseFloat(req.query.lon || '80.6480');
@@ -496,7 +504,7 @@ app.get('/api/weather', async (req, res) => {
  * 2. GET /api/geocode/reverse
  * Reverse-geocodes browser geolocation coordinates into readable city, district, state
  */
-app.get('/api/geocode/reverse', async (req, res) => {
+apiRouter.get('/geocode/reverse', async (req, res) => {
   try {
     const lat = parseFloat(req.query.lat);
     const lon = parseFloat(req.query.lon);
@@ -590,7 +598,7 @@ app.get('/api/geocode/reverse', async (req, res) => {
  * 3. GET /api/geocode/search
  * Search for any city in India or globally
  */
-app.get('/api/geocode/search', async (req, res) => {
+apiRouter.get('/geocode/search', async (req, res) => {
   try {
     const query = req.query.q || '';
     if (!query.trim()) {
@@ -680,7 +688,7 @@ app.get('/api/geocode/search', async (req, res) => {
  * 4. GET /api/historical
  * Retrieves real historical weather observations for 7 or 30 days
  */
-app.get('/api/historical', async (req, res) => {
+apiRouter.get('/historical', async (req, res) => {
   try {
     const lat = parseFloat(req.query.lat || '16.5062');
     const lon = parseFloat(req.query.lon || '80.6480');
@@ -745,17 +753,21 @@ app.get('/api/historical', async (req, res) => {
 
 /**
  * 5. GET /api/health
- * Health check endpoint
+ * Health check endpoint required by deployment specifications
  */
-app.get('/api/health', (req, res) => {
+apiRouter.get('/health', (req, res) => {
   const hasKey = Boolean(process.env.WEATHER_API_KEY && process.env.WEATHER_API_KEY.trim());
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
   res.json({
-    status: 'online',
+    status: 'ok',
+    backend: 'connected',
     service: 'HeatGuard AI Telemetry & Auth Gateway',
     timestamp: new Date().toISOString(),
     cacheEntries: cache.size,
     provider: hasKey ? 'WeatherAPI.com (Key Active)' : (process.env.WEATHER_API_PROVIDER || 'openmeteo'),
-    activeKey: hasKey
+    activeKey: hasKey,
+    environment: process.env.VERCEL ? 'vercel-serverless' : (process.env.NODE_ENV || 'production')
   });
 });
 
@@ -782,7 +794,7 @@ function requireAuth(req, res, next) {
 /**
  * POST /api/auth/signup
  */
-app.post('/api/auth/signup', async (req, res) => {
+apiRouter.post('/auth/signup', async (req, res) => {
   try {
     const { name, email, phone, location, userCategory, password, confirmPassword } = req.body || {};
 
@@ -832,7 +844,7 @@ app.post('/api/auth/signup', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    return res.status(201).json({ user: db.sanitizeUser(newUser) });
+    return res.status(201).json({ user: db.sanitizeUser(newUser), token: session.sessionId });
   } catch (err) {
     console.error('Signup error:', err);
     return res.status(500).json({ error: 'Failed to process account registration.' });
@@ -842,7 +854,7 @@ app.post('/api/auth/signup', async (req, res) => {
 /**
  * POST /api/auth/login
  */
-app.post('/api/auth/login', async (req, res) => {
+apiRouter.post('/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body || {};
     const clientIp = req.ip || req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1';
@@ -885,7 +897,7 @@ app.post('/api/auth/login', async (req, res) => {
       maxAge: 7 * 24 * 60 * 60 * 1000
     });
 
-    return res.json({ user: db.sanitizeUser(user) });
+    return res.json({ user: db.sanitizeUser(user), token: session.sessionId });
   } catch (err) {
     console.error('Login error:', err);
     return res.status(500).json({ error: 'Authentication processing failed.' });
@@ -895,7 +907,7 @@ app.post('/api/auth/login', async (req, res) => {
 /**
  * GET /api/auth/me
  */
-app.get('/api/auth/me', (req, res) => {
+apiRouter.get('/auth/me', (req, res) => {
   const sessionId = req.cookies.heatguard_session || req.headers.authorization?.replace('Bearer ', '');
   if (!sessionId) {
     return res.status(401).json({ error: 'Not authenticated' });
@@ -917,7 +929,7 @@ app.get('/api/auth/me', (req, res) => {
 /**
  * POST /api/auth/logout
  */
-app.post('/api/auth/logout', (req, res) => {
+apiRouter.post('/auth/logout', (req, res) => {
   const sessionId = req.cookies.heatguard_session || req.headers.authorization?.replace('Bearer ', '');
   if (sessionId) {
     db.deleteSession(sessionId);
@@ -929,7 +941,7 @@ app.post('/api/auth/logout', (req, res) => {
 /**
  * POST /api/auth/forgot-password
  */
-app.post('/api/auth/forgot-password', (req, res) => {
+apiRouter.post('/auth/forgot-password', (req, res) => {
   const { email } = req.body || {};
   if (!email || !email.trim()) {
     return res.status(400).json({ error: 'Please enter your email address.' });
@@ -950,7 +962,7 @@ app.post('/api/auth/forgot-password', (req, res) => {
 /**
  * POST /api/auth/reset-password
  */
-app.post('/api/auth/reset-password', async (req, res) => {
+apiRouter.post('/auth/reset-password', async (req, res) => {
   try {
     const { token, newPassword, confirmPassword } = req.body || {};
     if (!token) {
@@ -988,7 +1000,7 @@ app.post('/api/auth/reset-password', async (req, res) => {
 /**
  * PUT /api/user/profile
  */
-app.put('/api/user/profile', requireAuth, (req, res) => {
+apiRouter.put('/user/profile', requireAuth, (req, res) => {
   try {
     const allowedUpdates = {
       name: req.body.name,
@@ -1014,7 +1026,7 @@ app.put('/api/user/profile', requireAuth, (req, res) => {
 /**
  * PUT /api/user/onboarding
  */
-app.put('/api/user/onboarding', requireAuth, (req, res) => {
+apiRouter.put('/user/onboarding', requireAuth, (req, res) => {
   try {
     const updated = db.updateUser(req.user.id, { onboarded: true });
     return res.json({ user: db.sanitizeUser(updated) });
@@ -1023,21 +1035,39 @@ app.put('/api/user/onboarding', requireAuth, (req, res) => {
   }
 });
 
-// Serve production build assets from dist if available
+// Mount the API router on both '/api' and '/'
+// This guarantees requests reach the endpoints whether Vercel rewrites preserve '/api' or strip it
+app.use('/api', apiRouter);
+app.use('/', apiRouter);
+
+// Serve production build assets from dist if available (only in standalone Node mode)
 const distPath = path.resolve(__dirname, '../dist');
-app.use(express.static(distPath));
+if (!process.env.VERCEL) {
+  try {
+    if (fs.existsSync(distPath)) {
+      app.use(express.static(distPath));
+      app.get(/^(?!\/api).+/, (req, res) => {
+        res.sendFile(path.join(distPath, 'index.html'));
+      });
+    }
+  } catch {
+    // Ignore static serving fallback error
+  }
+}
 
-// Fallback for React SPA client-side routing (all non-API routes)
-app.get(/^(?!\/api).+/, (req, res) => {
-  res.sendFile(path.join(distPath, 'index.html'));
-});
+// Only bind port when executed directly (e.g. `node server/index.js`), not when imported
+const isDirectRun = Boolean(
+  process.argv[1] &&
+  (process.argv[1].endsWith('server/index.js') ||
+   process.argv[1].endsWith('server\\index.js'))
+);
 
-const server = app.listen(PORT, () => {
-  console.log(`[HeatGuard Backend] Telemetry API & Auth Gateway running on http://localhost:${PORT}`);
-});
-
-// Keep event loop active indefinitely for Express server
-setInterval(() => {}, 1000 * 60 * 60);
+if (!process.env.VERCEL && isDirectRun) {
+  app.listen(PORT, () => {
+    console.log(`[HeatGuard Backend] Telemetry API & Auth Gateway running on http://localhost:${PORT}`);
+  });
+  setInterval(() => {}, 1000 * 60 * 60);
+}
 
 export default app;
 export { app };

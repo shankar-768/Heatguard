@@ -4,34 +4,85 @@ import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import { fileURLToPath } from 'url';
 
+import os from 'os';
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DATA_DIR = path.resolve(__dirname, 'data');
+// In serverless environments (Vercel / AWS Lambda), the deployment directory is strictly read-only.
+// /tmp is the only writable filesystem location.
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const SEED_DATA_DIR = path.resolve(__dirname, 'data');
+const DATA_DIR = isServerless ? path.join(os.tmpdir(), 'heatguard_data') : SEED_DATA_DIR;
+
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
+const SEED_USERS_FILE = path.join(SEED_DATA_DIR, 'users.json');
+const SEED_SESSIONS_FILE = path.join(SEED_DATA_DIR, 'sessions.json');
 
-// Ensure data directory exists
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
+// In-memory fallback in case filesystem writes fail
+let memoryUsers = null;
+let memorySessions = null;
+
+// Ensure data directory exists if possible
+try {
+  if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  }
+} catch (dirErr) {
+  console.warn('[HeatGuard DB] Could not create DATA_DIR, using in-memory mode:', dirErr.message);
 }
 
-// Atomic file write helper to prevent data corruption
+// Atomic file write helper with safe fallback
 function safeWriteJson(filePath, data) {
-  const tempPath = `${filePath}.tmp.${Date.now()}`;
-  fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
-  fs.renameSync(tempPath, filePath);
+  if (filePath === USERS_FILE) {
+    memoryUsers = data;
+  } else if (filePath === SESSIONS_FILE) {
+    memorySessions = data;
+  }
+
+  try {
+    const parentDir = path.dirname(filePath);
+    if (!fs.existsSync(parentDir)) {
+      fs.mkdirSync(parentDir, { recursive: true });
+    }
+    const tempPath = `${filePath}.tmp.${Date.now()}`;
+    fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
+    fs.renameSync(tempPath, filePath);
+  } catch (err) {
+    console.warn(`[HeatGuard DB] File write failed for ${filePath}, retained in memory:`, err.message);
+  }
 }
 
 function loadJson(filePath, defaultValue) {
+  if (filePath === USERS_FILE && memoryUsers !== null) {
+    return memoryUsers;
+  }
+  if (filePath === SESSIONS_FILE && memorySessions !== null) {
+    return memorySessions;
+  }
+
   try {
-    if (!fs.existsSync(filePath)) {
-      return defaultValue;
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      return JSON.parse(raw);
     }
-    const raw = fs.readFileSync(filePath, 'utf8');
-    return JSON.parse(raw);
+    
+    // In serverless, if /tmp file does not exist yet, check seed file
+    if (isServerless) {
+      const seedPath = filePath === USERS_FILE ? SEED_USERS_FILE : SEED_SESSIONS_FILE;
+      if (fs.existsSync(seedPath)) {
+        const raw = fs.readFileSync(seedPath, 'utf8');
+        const parsed = JSON.parse(raw);
+        // Copy seed to /tmp asynchronously/safely
+        safeWriteJson(filePath, parsed);
+        return parsed;
+      }
+    }
+
+    return defaultValue;
   } catch (error) {
-    console.error(`Error reading ${filePath}:`, error.message);
+    console.warn(`[HeatGuard DB] Error reading ${filePath}, using fallback:`, error.message);
     return defaultValue;
   }
 }
