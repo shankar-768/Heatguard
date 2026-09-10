@@ -1,0 +1,100 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-primary: #07111F;
+    --bg-secondary: #0D1B2A;
+    --surface-card: #12263A;
+    --surface-elevated: #17324A;
+    --accent-cyan: #36C5F0;
+    --accent-indigo: #7C83FD;
+    --status-success: #35D07F;
+    --status-warning: #F4C95D;
+    --status-critical: #FF5C77;
+    --text-primary: #F4F8FC;
+    --text-secondary: #9FB2C5;
+    --border-color: #23415A;
+
+    --font-heading: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-body: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+  }
+
+  body {
+    font-family: var(--font-body);
+    background-color: #07111F;
+    color: #F4F8FC;
+    overflow-x: hidden;
+    background-image: 
+      radial-gradient(circle at 50% 0%, rgba(54, 197, 240, 0.07) 0%, transparent 60%),
+      radial-gradient(circle at 100% 100%, rgba(124, 131, 253, 0.05) 0%, transparent 50%),
+      linear-gradient(to right, rgba(35, 65, 90, 0.15) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(35, 65, 90, 0.15) 1px, transparent 1px);
+    background-size: 100% 100%, 100% 100%, 40px 40px, 40px 40px;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-heading);
+    letter-spacing: -0.02em;
+  }
+}
+
+/* SIH 2026 Enterprise Climate Cards */
+.sih-card {
+  background-color: #12263A;
+  border: 1px solid #23415A;
+  border-radius: 16px;
+  box-shadow: 0 4px 20px -2px rgba(3, 8, 16, 0.5);
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+
+.sih-card:hover {
+  border-color: rgba(54, 197, 240, 0.4);
+}
+
+.sih-card-elevated {
+  background-color: #17324A;
+  border: 1px solid #23415A;
+  border-radius: 16px;
+  box-shadow: 0 8px 30px -4px rgba(3, 8, 16, 0.7);
+}
+
+/* Soft Glowing Borders */
+.sih-border-cyan {
+  border-color: #36C5F0;
+}
+
+.sih-glow-cyan {
+  box-shadow: 0 0 20px -5px rgba(54, 197, 240, 0.25);
+}
+
+.sih-glow-critical {
+  box-shadow: 0 0 20px -5px rgba(255, 92, 119, 0.25);
+}
+
+/* Custom Scrollbar - Sleek Climate Navy */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #07111F;
+}
+::-webkit-scrollbar-thumb {
+  background: #1C3852;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #36C5F0;
+}
+
+/* Print Styles */
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
