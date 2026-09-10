@@ -1035,6 +1035,75 @@ apiRouter.put('/user/onboarding', requireAuth, (req, res) => {
   }
 });
 
+/**
+ * GET /api/user/searches
+ * Retrieves previously searched locations from database
+ */
+apiRouter.get('/user/searches', (req, res) => {
+  try {
+    const sessionId = req.cookies.heatguard_session || req.headers.authorization?.replace('Bearer ', '');
+    const session = sessionId ? db.findSession(sessionId) : null;
+    const userId = session ? session.userId : null;
+    const searches = db.getSearches(userId);
+    return res.json({ searches });
+  } catch (err) {
+    console.error('Failed to get searches:', err);
+    return res.status(500).json({ error: 'Failed to retrieve search history' });
+  }
+});
+
+/**
+ * POST /api/user/searches
+ * Stores a newly searched location in the database
+ */
+apiRouter.post('/user/searches', (req, res) => {
+  try {
+    const sessionId = req.cookies.heatguard_session || req.headers.authorization?.replace('Bearer ', '');
+    const session = sessionId ? db.findSession(sessionId) : null;
+    const userId = session ? session.userId : null;
+    const location = req.body || {};
+    if (!location.name) {
+      return res.status(400).json({ error: 'Location name is required' });
+    }
+    const updated = db.addSearch(userId, location);
+    return res.status(201).json({ success: true, searches: updated });
+  } catch (err) {
+    console.error('Failed to record search:', err);
+    return res.status(500).json({ error: 'Failed to save search history' });
+  }
+});
+
+/**
+ * DELETE /user/searches and DELETE /user/searches/:id
+ * Clears or removes an entry from search history in database
+ */
+apiRouter.delete('/user/searches', (req, res) => {
+  try {
+    const sessionId = req.cookies.heatguard_session || req.headers.authorization?.replace('Bearer ', '');
+    const session = sessionId ? db.findSession(sessionId) : null;
+    const userId = session ? session.userId : null;
+    const updated = db.clearSearches(userId);
+    return res.json({ success: true, searches: updated });
+  } catch (err) {
+    console.error('Failed to clear searches:', err);
+    return res.status(500).json({ error: 'Failed to delete search history' });
+  }
+});
+
+apiRouter.delete('/user/searches/:id', (req, res) => {
+  try {
+    const sessionId = req.cookies.heatguard_session || req.headers.authorization?.replace('Bearer ', '');
+    const session = sessionId ? db.findSession(sessionId) : null;
+    const userId = session ? session.userId : null;
+    const searchId = req.params.id;
+    const updated = db.deleteSearch(userId, searchId);
+    return res.json({ success: true, searches: updated });
+  } catch (err) {
+    console.error('Failed to delete search:', err);
+    return res.status(500).json({ error: 'Failed to delete search history' });
+  }
+});
+
 // Mount the API router on both '/api' and '/'
 // This guarantees requests reach the endpoints whether Vercel rewrites preserve '/api' or strip it
 app.use('/api', apiRouter);

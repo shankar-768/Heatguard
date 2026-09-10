@@ -60,7 +60,7 @@ export const locationService = {
   },
 
   /**
-   * Get user's recently searched/selected locations
+   * Get user's recently searched/selected locations (from cache)
    */
   getRecentLocations(): CityLocation[] {
     try {
@@ -76,9 +76,55 @@ export const locationService = {
   },
 
   /**
-   * Add a location to recent history
+   * Fetch previously searched locations directly from the backend database
+   */
+  async fetchRecentLocationsFromDb(): Promise<CityLocation[]> {
+    try {
+      const token = localStorage.getItem('heatguard_session_token');
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      const res = await fetch(`${API_BASE}/user/searches`, {
+        headers,
+        credentials: 'include'
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.searches) && data.searches.length > 0) {
+          const mapped: CityLocation[] = data.searches.map((s: any) => ({
+            id: s.id || `loc-${s.name.toLowerCase().replace(/\s+/g, '-')}`,
+            name: s.name,
+            city: s.city || s.name,
+            district: s.district || s.state || '',
+            state: s.state || s.region || '',
+            region: s.region || s.state || '',
+            country: s.country || 'India',
+            lat: typeof s.lat === 'number' ? s.lat : parseFloat(s.lat) || 16.5062,
+            lng: typeof s.lng === 'number' ? s.lng : parseFloat(s.lng) || 80.6480,
+            latitude: typeof s.lat === 'number' ? s.lat : parseFloat(s.lat) || 16.5062,
+            longitude: typeof s.lng === 'number' ? s.lng : parseFloat(s.lng) || 80.6480,
+            displayName: s.displayName || `${s.name}${s.state ? `, ${s.state}` : ''}`,
+            baseTemp: 32.0,
+            baseHumidity: 50,
+            riskLevel: 'Moderate',
+            thermalStressScore: 50
+          }));
+          localStorage.setItem(STORAGE_KEY_RECENT_LOCATIONS, JSON.stringify(mapped));
+          return mapped;
+        }
+      }
+    } catch (err) {
+      console.warn('[locationService] Failed to load searches from database, using cache:', err);
+    }
+    return this.getRecentLocations();
+  },
+
+  /**
+   * Add a location to search history (persists in both localStorage and backend database)
    */
   addRecentLocation(location: CityLocation): void {
+    // 1. Save to client cache for immediate UI rendering
     try {
       const recents = this.getRecentLocations();
       const filtered = recents.filter(
@@ -87,10 +133,60 @@ export const locationService = {
           Math.abs(r.lat - location.lat) > 0.1 ||
           Math.abs(r.lng - location.lng) > 0.1
       );
-      const updated = [location, ...filtered].slice(0, 8);
+      const updated = [location, ...filtered].slice(0, 10);
       localStorage.setItem(STORAGE_KEY_RECENT_LOCATIONS, JSON.stringify(updated));
     } catch {
       // ignore
+    }
+
+    // 2. Persist to backend database asynchronously
+    try {
+      const token = localStorage.getItem('heatguard_session_token');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        Accept: 'application/json'
+      };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      fetch(`${API_BASE}/user/searches`, {
+        method: 'POST',
+        headers,
+        credentials: 'include',
+        body: JSON.stringify({
+          id: location.id,
+          name: location.name,
+          city: location.city || location.name,
+          district: location.district || location.state || '',
+          state: location.state || location.region || '',
+          region: location.region || location.state || '',
+          country: location.country || 'India',
+          lat: location.lat,
+          lng: location.lng,
+          displayName: location.displayName
+        })
+      }).catch((err) => console.warn('[locationService] Failed to save search to database:', err));
+    } catch {
+      // ignore async errors
+    }
+  },
+
+  /**
+   * Clear all search history from local storage and backend database
+   */
+  async clearSearchHistory(): Promise<void> {
+    localStorage.removeItem(STORAGE_KEY_RECENT_LOCATIONS);
+    try {
+      const token = localStorage.getItem('heatguard_session_token');
+      const headers: Record<string, string> = { Accept: 'application/json' };
+      if (token) headers['Authorization'] = `Bearer ${token}`;
+
+      await fetch(`${API_BASE}/user/searches`, {
+        method: 'DELETE',
+        headers,
+        credentials: 'include'
+      });
+    } catch (err) {
+      console.warn('[locationService] Failed to clear searches from DB:', err);
     }
   },
 

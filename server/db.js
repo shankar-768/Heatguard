@@ -17,12 +17,15 @@ const DATA_DIR = isServerless ? path.join(os.tmpdir(), 'heatguard_data') : SEED_
 
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 const SESSIONS_FILE = path.join(DATA_DIR, 'sessions.json');
+const SEARCHES_FILE = path.join(DATA_DIR, 'searches.json');
 const SEED_USERS_FILE = path.join(SEED_DATA_DIR, 'users.json');
 const SEED_SESSIONS_FILE = path.join(SEED_DATA_DIR, 'sessions.json');
+const SEED_SEARCHES_FILE = path.join(SEED_DATA_DIR, 'searches.json');
 
 // In-memory fallback in case filesystem writes fail
 let memoryUsers = null;
 let memorySessions = null;
+let memorySearches = null;
 
 // Ensure data directory exists if possible
 try {
@@ -39,6 +42,8 @@ function safeWriteJson(filePath, data) {
     memoryUsers = data;
   } else if (filePath === SESSIONS_FILE) {
     memorySessions = data;
+  } else if (filePath === SEARCHES_FILE) {
+    memorySearches = data;
   }
 
   try {
@@ -61,6 +66,9 @@ function loadJson(filePath, defaultValue) {
   if (filePath === SESSIONS_FILE && memorySessions !== null) {
     return memorySessions;
   }
+  if (filePath === SEARCHES_FILE && memorySearches !== null) {
+    return memorySearches;
+  }
 
   try {
     if (fs.existsSync(filePath)) {
@@ -70,7 +78,11 @@ function loadJson(filePath, defaultValue) {
     
     // In serverless, if /tmp file does not exist yet, check seed file
     if (isServerless) {
-      const seedPath = filePath === USERS_FILE ? SEED_USERS_FILE : SEED_SESSIONS_FILE;
+      const seedPath = filePath === USERS_FILE 
+        ? SEED_USERS_FILE 
+        : filePath === SESSIONS_FILE 
+        ? SEED_SESSIONS_FILE 
+        : SEED_SEARCHES_FILE;
       if (fs.existsSync(seedPath)) {
         const raw = fs.readFileSync(seedPath, 'utf8');
         const parsed = JSON.parse(raw);
@@ -132,6 +144,54 @@ function initDb() {
     users.push(demoUser);
     safeWriteJson(USERS_FILE, users);
     console.log('[HeatGuard DB] Seeded default demo user:', demoEmail);
+  }
+
+  // Seed default searches if empty
+  let searches = loadJson(SEARCHES_FILE, []);
+  if (!searches || searches.length === 0) {
+    const seedSearches = [
+      {
+        id: 'search_vijayawada',
+        userId: 'usr_sih_demo_01',
+        name: 'Vijayawada',
+        city: 'Vijayawada',
+        district: 'NTR District',
+        state: 'Andhra Pradesh',
+        country: 'India',
+        lat: 16.5062,
+        lng: 80.6480,
+        displayName: 'Vijayawada, Andhra Pradesh, India',
+        searchedAt: new Date(Date.now() - 1000 * 60 * 25).toISOString()
+      },
+      {
+        id: 'search_guntur',
+        userId: 'usr_sih_demo_01',
+        name: 'Guntur',
+        city: 'Guntur',
+        district: 'Guntur',
+        state: 'Andhra Pradesh',
+        country: 'India',
+        lat: 16.3067,
+        lng: 80.4365,
+        displayName: 'Guntur, Andhra Pradesh, India',
+        searchedAt: new Date(Date.now() - 1000 * 60 * 95).toISOString()
+      },
+      {
+        id: 'search_amaravati',
+        userId: 'usr_sih_demo_01',
+        name: 'Amaravati',
+        city: 'Amaravati',
+        district: 'Guntur',
+        state: 'Andhra Pradesh',
+        country: 'India',
+        lat: 16.5131,
+        lng: 80.5165,
+        displayName: 'Amaravati, Andhra Pradesh, India',
+        searchedAt: new Date(Date.now() - 1000 * 60 * 240).toISOString()
+      }
+    ];
+    safeWriteJson(SEARCHES_FILE, seedSearches);
+    console.log('[HeatGuard DB] Seeded default search history');
   }
 }
 
@@ -289,5 +349,71 @@ export const db = {
     if (!user) return null;
     const { passwordHash, resetToken, resetTokenExpires, ...safeUser } = user;
     return safeUser;
+  },
+
+  // --- SEARCH HISTORY DATABASE ---
+  getSearches(userId) {
+    const all = loadJson(SEARCHES_FILE, []);
+    if (!userId) {
+      return all.slice(0, 10);
+    }
+    const filtered = all.filter(s => s.userId === userId || !s.userId);
+    return filtered.slice(0, 15);
+  },
+
+  addSearch(userId, location) {
+    if (!location || !location.name) return this.getSearches(userId);
+    const all = loadJson(SEARCHES_FILE, []);
+    
+    // Deduplicate by name or close latitude/longitude
+    const existingIndex = all.findIndex(
+      s => (s.userId === userId || (!userId && !s.userId)) &&
+           (s.name?.toLowerCase() === location.name.toLowerCase() ||
+            (Math.abs(s.lat - location.lat) < 0.05 && Math.abs(s.lng - location.lng) < 0.05))
+    );
+
+    const latVal = typeof location.lat === 'number' ? location.lat : parseFloat(location.lat) || 0;
+    const lngVal = typeof location.lng === 'number' ? location.lng : parseFloat(location.lng) || 0;
+
+    const searchEntry = {
+      id: location.id || `search_${Date.now()}_${crypto.randomBytes(3).toString('hex')}`,
+      userId: userId || null,
+      name: location.name,
+      city: location.city || location.name,
+      district: location.district || location.region || '',
+      state: location.state || location.region || '',
+      region: location.region || '',
+      country: location.country || 'India',
+      lat: latVal,
+      lng: lngVal,
+      latitude: latVal,
+      longitude: lngVal,
+      displayName: location.displayName || `${location.name}${location.state ? `, ${location.state}` : ''}`,
+      searchedAt: new Date().toISOString()
+    };
+
+    if (existingIndex !== -1) {
+      all.splice(existingIndex, 1);
+    }
+
+    all.unshift(searchEntry);
+
+    const trimmed = all.slice(0, 50);
+    safeWriteJson(SEARCHES_FILE, trimmed);
+    return this.getSearches(userId);
+  },
+
+  deleteSearch(userId, searchId) {
+    const all = loadJson(SEARCHES_FILE, []);
+    const updated = all.filter(s => !(s.id === searchId && (s.userId === userId || !s.userId)));
+    safeWriteJson(SEARCHES_FILE, updated);
+    return this.getSearches(userId);
+  },
+
+  clearSearches(userId) {
+    const all = loadJson(SEARCHES_FILE, []);
+    const updated = userId ? all.filter(s => s.userId !== userId) : [];
+    safeWriteJson(SEARCHES_FILE, updated);
+    return [];
   }
 };
